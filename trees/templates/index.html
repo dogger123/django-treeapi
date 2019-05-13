@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+ <head> 
+  <meta charset="utf-8" /> 
+  <title>Draw Tree</title> 
+  <style>
+
+	.node circle {
+	  fill: #fff;
+	  stroke: #fc5185;
+	  stroke-width: 2px;
+	}
+
+	.node text { font: 14px sans-serif; stroke: #364f6b}
+
+	.link {
+	  fill: none;
+	  stroke: #3fc1c9;
+	  stroke-width: 2px;
+	}
+
+    </style>
+ </head>
+ <body>
+  <!-- load the d3.js library -->
+{#  <script src="http://d3js.org/d3.v3.min.js"></script>#}
+  <script src="https://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+  <script>
+  /*数据预处理阶段*/
+	jsonstr={{jsonContent | safe}}
+	json = JSON.parse(jsonstr)
+
+    /*原json格式说明:
+       {"name": "outlook",
+        "text": "null",
+        "children": [{
+            "name": "N",
+            "text": "sunny",
+            "children": "null"
+        },]
+       }
+    */
+    //树数组，全程序的核心数组
+    data = []
+    console.log("--------预处理开始-----------")
+    //全局变量
+    var count = 0;
+    //给予每条json独立的fid以便map唯一映射
+    function giveId(json) {
+        json.no = count++;
+        if (json["children"] instanceof Array) {
+            for (var x = 0; x < json["children"].length; x++) {
+                giveId(json["children"][x])
+            }
+        }
+    }
+    /*给予no字段后的json格式说明:
+       {"no": "item0",
+        "name": "outlook",
+        "text": "null",
+        "children": [{
+            "no": "item1",
+            "name": "N",
+            "text": "sunny",
+            "children": "null"
+        },]
+       }
+    */
+    //对于每一层json
+    //  将 name text parent no 整理好插入数组
+    //  如果child是"null"返回
+    //  如果child不是"null"，递归
+    function viewJson(json, parent) {
+        dataitem = new Object()
+        dataitem.no = json["no"]
+        dataitem.name = json["name"]
+        dataitem.parent = parent
+        dataitem.text = json["text"]
+        data.push(dataitem)
+        if (json["children"] instanceof Array) {
+            for (var i = 0; i < json["children"].length; i++) {
+                viewJson(json["children"][i], json["no"])
+            }
+        }
+
+    }
+    giveId(json)
+    viewJson(json, "null")
+    console.log("-------预处理结束---------")
+
+    // *********** Convert flat data into a nice tree ***************
+    // create a name: node map
+    var dataMap = data.reduce(function(map, node) {
+        map[node.no] = node;
+        //map[node.fno] = node;
+        return map;
+    },
+    {});
+
+    // create the tree array
+    var treeData = [];
+    data.forEach(function(node) {
+        // add to parent
+        var parent = dataMap[node.parent];
+        if (parent) {
+            // create child array if it doesn"t exist
+            (parent.children || (parent.children = []))
+            // add node to child array
+            .push(node);
+        } else {
+            // parent is null or missing
+            treeData.push(node);
+        }
+    });
+
+    // ************** Generate the tree diagram	 *****************
+    //为了遍历分支上的文字所用
+    var nos = []
+    var margin = {
+        top: 20,
+        right: 120,
+        bottom: 20,
+        left: 120
+    },
+    //width = 960 - margin.right - margin.left,
+    //height = 500 - margin.top - margin.bottom;
+
+    width = 2000 - margin.right - margin.left,
+    height = 800 - margin.top - margin.bottom;
+    var i = 0;
+
+    var tree = d3.layout.tree().size([height, width]);
+
+    var diagonal = d3.svg.diagonal().projection(function(d) {
+        return [d.y, d.x];
+    });
+
+    var svg = d3.select("body").append("svg").attr("width", width + margin.right + margin.left).attr("height", height + margin.top + margin.bottom).append("g").attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+    root = treeData[0];
+
+    update(root);
+
+/*------核心函数：对节点和分支连线进行加载----------*/
+    function update(source) {
+
+        // Compute the new tree layout.
+        var nodes = tree.nodes(root).reverse(),
+        links = tree.links(nodes);
+
+        // Normalize for fixed-depth.
+        nodes.forEach(function(d) {
+            d.y = d.depth * 180;
+        });
+
+        // Declare the nodes…
+        var node = svg.selectAll("g.node").data(nodes,
+        function(d) {
+            return d.id || (d.id = ++i);
+        });
+
+        // Enter the nodes.
+        var nodeEnter = node.enter().append("g").attr("class", "node").attr("transform",
+        function(d) {
+            return "translate(" + d.y + "," + d.x + ")";
+        });
+
+        nodeEnter.append("circle").attr("r", 10).style("fill", "#fff");
+
+        nodeEnter.append("text").attr("x",
+        function(d) {
+            return d.children || d._children ? -13 : 13;
+        }).attr("dy", ".35em").attr("text-anchor",
+        function(d) {
+            return d.children || d._children ? "end": "start";
+        }).text(function(d) {
+            return d.name;
+        }).style("fill-opacity", 1);
+
+        //定义连线
+        var linkEnter = svg.selectAll("path.link").append("g").data(links,
+        function(d) {
+            return d.target.id;
+        });
+
+        //在指定元素之前插入一个元素
+        linkEnter.enter().insert("path", "g")
+        .attr("class", "link").attr("d", diagonal)
+        // 首先为每条节点连线添加标识id
+        .attr("id",
+        function(d, i) {
+            //这里的顺序就是节点构造顺序，这里的no顺序就是最后文字输出的no顺序
+            nos.push(d.target.no)
+            return d.target.no;
+        });
+
+        //为连线添加文字
+        linkEnter.enter()
+                .append("text")
+                .attr("x", 90)
+                .attr("y", 20)
+                .style("fill", "#2470a0")
+                //!!定义分支文字处!!
+                .style("font-size", "15px")
+                .style("font-weight", "bold")
+                .append("textPath")
+                .attr({ //引用路径
+                    "xlink:href": function(d, i) {
+                        //这个是必要的，因为这个id是后面text出现的主要依据
+                        return "#" + nos[i];
+                    }
+                })
+                .text(function(d, i) {
+                    //return i + " : " + data[nos[i]]["text"]
+                    return data[nos[i]]["text"]
+                });
+    }
+/*--------------核心函数结束-------------*/
+  </script>
+ </body>
+</html>
